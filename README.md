@@ -1,7 +1,7 @@
 # 🧠 AskMyDocs
 
 AskMyDocs is an AI-powered document assistant that allows users to upload files (PDFs, Word docs, etc.) and ask natural language questions to retrieve accurate answers from their content.  
-It uses **Retrieval-Augmented Generation (RAG)** with **LangChain**, **Chroma**, and **Groq** for intelligent context-aware responses.
+It uses **Retrieval-Augmented Generation (RAG)** with **LangChain**, **Chroma**, and **Llama** for intelligent context-aware responses.
 
 ---
 
@@ -13,8 +13,6 @@ It uses **Retrieval-Augmented Generation (RAG)** with **LangChain**, **Chroma**,
 - 🧩 Vector search using ChromaDB  
 - 🔒 Django REST API for backend services  
 - 💬 React-based responsive chat interface  
-- 🌍 Environment configuration with `.env`  
-- 🐳 Optional Docker setup for containerized deployment
 
 ---
 
