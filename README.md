@@ -27,7 +27,7 @@ It uses **Retrieval-Augmented Generation (RAG)** with **LangChain**, **Chroma**,
 ### **Frontend**
 - React.js  
 - Axios for API communication  
-- TailwindCSS or Bootstrap for UI
+
 
 ---
 
