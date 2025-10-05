@@ -1,0 +1,14 @@
+langchain
+langchain-community
+langchain-chroma
+langchain-huggingface
+langchain-groq
+chromadb
+pypdf
+python-docx
+python-magic-bin
+tiktoken
+requests
+sentence-transformers
+python-dotenv
+groq

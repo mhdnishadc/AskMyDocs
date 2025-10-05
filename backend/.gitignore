@@ -1,0 +1,32 @@
+# Python-related
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+*.venv
+env/
+venv/
+ENV/
+.env
+.venv
+Pipfile
+Pipfile.lock
+
+# Django-related
+db.sqlite3
+*.log
+media/
+staticfiles/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# LangChain-related
+chroma_db/
