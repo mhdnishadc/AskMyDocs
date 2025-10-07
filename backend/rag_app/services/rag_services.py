@@ -1,4 +1,4 @@
-# services/rag_service.py - Clean version WITHOUT sources
+# services/rag_service.py 
 import os
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
