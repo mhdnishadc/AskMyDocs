@@ -8,7 +8,7 @@ langchain-huggingface
 langchain-groq
 pypdf
 python-docx
-python-magic-bin
+python-magic
 tiktoken
 requests
 sentence-transformers
