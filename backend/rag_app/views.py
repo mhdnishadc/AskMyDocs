@@ -42,7 +42,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             file_type=file_ext
         )
         
-        # ===== FIX: Handle S3 storage (no direct file path) =====
+        
         temp_file_path = None
         try:
             # Create temporary file to download S3 content

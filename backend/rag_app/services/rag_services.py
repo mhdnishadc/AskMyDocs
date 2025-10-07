@@ -25,7 +25,7 @@ class RAGService:
             encode_kwargs={'normalize_embeddings': True}
         )
         
-        # Initialize Pinecone
+        # Initialize Pinecone Vector Store
         self.pinecone_api_key = os.getenv('PINECONE_API_KEY')
         self.groq_api_key = os.getenv('GROQ_API_KEY')
         
