@@ -17,7 +17,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-default-key-change-in-prod
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 # Allowed Hosts
- ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 INSTALLED_APPS = [
