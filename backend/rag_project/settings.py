@@ -113,7 +113,7 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-# Media files - Smart switching between local and S3
+# Media files - Smart switching between local and AWS S3
 USE_S3 = True
 
 if USE_S3:
