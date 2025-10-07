@@ -7,6 +7,7 @@ from .models import Document, ChatHistory
 from .serializers import DocumentSerializer, ChatHistorySerializer, QuestionSerializer
 from .services.rag_services import RAGService
 import os
+import tempfile
 
 rag_service = RAGService()
 
@@ -41,29 +42,64 @@ class DocumentViewSet(viewsets.ModelViewSet):
             file_type=file_ext
         )
         
-        # Process document with RAG
-        success, message = rag_service.process_document(
-            document.file.path,
-            document.file_type
-        )
-        
-        if success:
-            document.processed = True
-            document.save()
-            serializer = self.get_serializer(document)
-            return Response(
-                {
-                    'document': serializer.data,
-                    'message': message
-                },
-                status=status.HTTP_201_CREATED
+        # ===== FIX: Handle S3 storage (no direct file path) =====
+        temp_file_path = None
+        try:
+            # Create temporary file to download S3 content
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_file:
+                # Open the file from S3
+                document.file.open('rb')
+                
+                # Read and write chunks to temp file
+                for chunk in document.file.chunks():
+                    tmp_file.write(chunk)
+                
+                # Close S3 file
+                document.file.close()
+                
+                # Store temp file path
+                temp_file_path = tmp_file.name
+            
+            # Process document with RAG using temporary file path
+            success, message = rag_service.process_document(
+                temp_file_path,  # ✅ Use temp file path instead of document.file.path
+                document.file_type
             )
-        else:
-            document.delete()
+            
+            if success:
+                document.processed = True
+                document.save()
+                serializer = self.get_serializer(document)
+                return Response(
+                    {
+                        'document': serializer.data,
+                        'message': message
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+            else:
+                document.delete()
+                return Response(
+                    {'error': f'Failed to process document: {message}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        
+        except Exception as e:
+            # Clean up document on error
+            if document.id:
+                document.delete()
             return Response(
-                {'error': f'Failed to process document: {message}'},
+                {'error': f'Error processing document: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+        
+        finally:
+            # Always clean up temporary file
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                except Exception as e:
+                    print(f"Warning: Could not delete temp file {temp_file_path}: {e}")
     
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()

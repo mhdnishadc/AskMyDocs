@@ -1,9 +1,11 @@
+﻿Django
+djangorestframework
+django-cors-headers
 langchain
 langchain-community
 langchain-chroma
 langchain-huggingface
 langchain-groq
-chromadb
 pypdf
 python-docx
 python-magic-bin
@@ -12,3 +14,11 @@ requests
 sentence-transformers
 python-dotenv
 groq
+gunicorn
+psycopg2-binary
+dj-database-url
+boto3
+django-storages
+pinecone-client
+langchain-pinecone
+

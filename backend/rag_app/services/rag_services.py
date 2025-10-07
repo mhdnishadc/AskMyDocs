@@ -7,6 +7,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
+from pinecone import Pinecone
+from langchain_pinecone import PineconeVectorStore
 from django.conf import settings
 import logging
 
@@ -23,58 +25,92 @@ class RAGService:
             encode_kwargs={'normalize_embeddings': True}
         )
         
-        self.persist_directory = os.path.join(settings.BASE_DIR, 'chroma_db')
-        self.vectorstore = None
-        
-        # Get Groq API key from environment
+        # Initialize Pinecone
+        self.pinecone_api_key = os.getenv('PINECONE_API_KEY')
         self.groq_api_key = os.getenv('GROQ_API_KEY')
+        
+        if not self.pinecone_api_key:
+            logger.warning("PINECONE_API_KEY not found in environment variables")
+        
         if not self.groq_api_key:
             logger.warning("GROQ_API_KEY not found in environment variables")
         
+        # Setup Pinecone
+        self.vectorstore = None
         self.load_vectorstore()
     
     def load_vectorstore(self):
-        """Load existing vectorstore or create new one"""
+        """Initialize Pinecone vectorstore"""
         try:
-            os.makedirs(self.persist_directory, exist_ok=True)
+            if not self.pinecone_api_key:
+                logger.error("Cannot initialize Pinecone without API key")
+                return
             
-            if os.path.exists(os.path.join(self.persist_directory, 'chroma.sqlite3')):
-                logger.info("Loading existing vectorstore...")
-                self.vectorstore = Chroma(
-                    persist_directory=self.persist_directory,
-                    embedding_function=self.embeddings
+            # Initialize Pinecone
+            pc = Pinecone(api_key=self.pinecone_api_key)
+            
+            index_name = "medical-rag"
+            
+            # Check if index exists, create if not
+            existing_indexes = [idx['name'] for idx in pc.list_indexes()]
+            
+            if index_name not in existing_indexes:
+                logger.info(f"Creating Pinecone index: {index_name}")
+                pc.create_index(
+                    name=index_name,
+                    dimension=384,  # Dimension for all-MiniLM-L6-v2
+                    metric='cosine',
+                    spec={
+                        'serverless': {
+                            'cloud': 'aws',
+                            'region': 'us-east-1'
+                        }
+                    }
                 )
+                logger.info(f"Index {index_name} created successfully")
             else:
-                logger.info("Creating new vectorstore...")
-                self.vectorstore = Chroma(
-                    persist_directory=self.persist_directory,
-                    embedding_function=self.embeddings
-                )
-        except Exception as e:
-            logger.error(f"Error loading vectorstore: {str(e)}")
-            self.vectorstore = Chroma(
-                persist_directory=self.persist_directory,
-                embedding_function=self.embeddings
+                logger.info(f"Using existing Pinecone index: {index_name}")
+            
+            # Get index
+            index = pc.Index(index_name)
+            
+            # Create vectorstore
+            self.vectorstore = PineconeVectorStore(
+                index=index,
+                embedding=self.embeddings,
+                text_key="text"
             )
+            
+            logger.info("Pinecone vectorstore initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Error initializing Pinecone: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def clean_text(self, text):
         """Clean and validate text content"""
         if not text:
             return None
         
+        # Remove excessive whitespace
         text = ' '.join(text.split())
+        
+        # Remove non-printable characters except newlines and tabs
         text = ''.join(char for char in text if char.isprintable() or char in ['\n', '\t'])
         
+        # Check if text has meaningful content (at least 10 characters)
         if len(text.strip()) < 10:
             return None
         
         return text.strip()
     
     def process_document(self, file_path, file_type):
-        """Process and add document to vectorstore"""
+        """Process and add document to Pinecone"""
         try:
             logger.info(f"Processing {file_type} file: {file_path}")
             
+            # Load document based on type
             if file_type == 'pdf':
                 loader = PyPDFLoader(file_path)
             elif file_type == 'docx':
@@ -84,6 +120,7 @@ class RAGService:
             else:
                 raise ValueError(f"Unsupported file type: {file_type}")
             
+            # Load documents
             logger.info("Loading document pages...")
             documents = loader.load()
             
@@ -92,6 +129,7 @@ class RAGService:
             
             logger.info(f"Loaded {len(documents)} pages")
             
+            # Filter and clean documents
             valid_documents = []
             for doc in documents:
                 cleaned_content = self.clean_text(doc.page_content)
@@ -104,6 +142,7 @@ class RAGService:
             
             logger.info(f"Found {len(valid_documents)} valid pages")
             
+            # Split documents into chunks
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=1000,
                 chunk_overlap=200,
@@ -114,6 +153,7 @@ class RAGService:
             logger.info("Splitting documents into chunks...")
             splits = text_splitter.split_documents(valid_documents)
             
+            # Filter out empty chunks
             valid_splits = []
             for split in splits:
                 cleaned_content = self.clean_text(split.page_content)
@@ -126,6 +166,7 @@ class RAGService:
             
             logger.info(f"Created {len(valid_splits)} valid chunks")
             
+            # Test embeddings with first chunk
             try:
                 test_embedding = self.embeddings.embed_query(valid_splits[0].page_content)
                 if not test_embedding or len(test_embedding) == 0:
@@ -135,11 +176,12 @@ class RAGService:
                 logger.error(f"Embedding validation failed: {str(e)}")
                 raise ValueError(f"Failed to generate embeddings: {str(e)}")
             
+            # Add to Pinecone in batches
             batch_size = 50
             total_batches = (len(valid_splits) + batch_size - 1) // batch_size
             added_count = 0
             
-            logger.info(f"Adding documents in {total_batches} batches...")
+            logger.info(f"Adding documents to Pinecone in {total_batches} batches...")
             
             for i in range(0, len(valid_splits), batch_size):
                 batch = valid_splits[i:i + batch_size]
@@ -157,7 +199,7 @@ class RAGService:
             if added_count == 0:
                 raise ValueError("Failed to add any chunks to vectorstore")
             
-            logger.info(f"Processing complete. Added {added_count} chunks")
+            logger.info(f"Processing complete. Added {added_count} chunks to Pinecone")
             return True, f"Successfully processed {added_count} chunks from {len(valid_documents)} pages"
             
         except Exception as e:
@@ -167,17 +209,26 @@ class RAGService:
             return False, str(e)
     
     def ask_question(self, question):
-        """Answer question based on vectorstore - WITHOUT SOURCES"""
+        """Answer question based on Pinecone vectorstore"""
         try:
-            collection = self.vectorstore._collection
-            if collection.count() == 0:
+            if not self.vectorstore:
+                return {
+                    'answer': 'Vector store not initialized. Please check Pinecone configuration.',
+                    'sources': []
+                }
+            
+            # Check if vectorstore has documents
+            stats = self.vectorstore._index.describe_index_stats()
+            total_vectors = stats.total_vector_count
+            
+            if total_vectors == 0:
                 return {
                     'answer': 'No documents have been uploaded yet. Please upload documents first.',
                     'sources': []
                 }
             
             logger.info(f"Searching for: {question}")
-            logger.info(f"Vectorstore has {collection.count()} chunks")
+            logger.info(f"Pinecone has {total_vectors} vectors")
             
             if not self.groq_api_key:
                 return {
@@ -236,12 +287,14 @@ Answer:"""
             }
     
     def clear_vectorstore(self):
-        """Clear all documents from vectorstore"""
+        """Clear all documents from Pinecone"""
         try:
-            if os.path.exists(self.persist_directory):
-                import shutil
-                shutil.rmtree(self.persist_directory)
-                self.load_vectorstore()
+            if not self.vectorstore:
+                return False, "Vectorstore not initialized"
+            
+            # Delete all vectors in the index
+            self.vectorstore._index.delete(delete_all=True)
+            logger.info("Pinecone index cleared successfully")
             return True, "Vectorstore cleared successfully"
         except Exception as e:
             logger.error(f"Error clearing vectorstore: {str(e)}")

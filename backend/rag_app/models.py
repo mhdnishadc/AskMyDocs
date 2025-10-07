@@ -19,11 +19,11 @@ class Document(models.Model):
         return self.title
     
     def delete(self, *args, **kwargs):
-        # Delete the file when the model is deleted
+    # Deletes file from storage (works for S3 and local)
         if self.file:
-            if os.path.isfile(self.file.path):
-                os.remove(self.file.path)
+            self.file.delete(save=False)
         super().delete(*args, **kwargs)
+
 
 class ChatHistory(models.Model):
     question = models.TextField()
