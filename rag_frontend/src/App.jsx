@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Upload, MessageCircle, File, Trash2, Send, X, FileText, Loader } from 'lucide-react';
 import './App.css';
 
-const API_URL = "http://51.20.103.86/api/";
+const API_URL = "http://51.20.103.86/api";
 
 
 function App() {
