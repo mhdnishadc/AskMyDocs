@@ -5,7 +5,6 @@ import {
   MessageCircle, Send, Paperclip, Trash2, LogOut,
   Plus, User, Loader, X, Check, Menu, Bot
 } from 'lucide-react';
-import './App.css';
 
 const API_URL = 'http://localhost:8000/api';
 
