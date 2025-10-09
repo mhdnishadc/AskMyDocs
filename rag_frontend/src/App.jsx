@@ -1,367 +1,633 @@
-// src/App.js
-import React, { useState, useEffect } from 'react';
-import { Upload, MessageCircle, File, Trash2, Send, X, FileText, Loader } from 'lucide-react';
+// src/App.js - Complete RAG App with Authentication & Threads
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  MessageCircle, Send, Paperclip, Trash2, LogOut,
+  Plus, User, Loader, X, Check, Menu, Bot
+} from 'lucide-react';
 import './App.css';
 
-const API_URL = "http://51.20.103.86/api";
-
+const API_URL = 'http://localhost:8000/api';
 
 function App() {
-  const [documents, setDocuments] = useState([]);
-  const [chatHistory, setChatHistory] = useState([]);
-  const [question, setQuestion] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [showAuth, setShowAuth] = useState('login');
+
+  // Auth states
+  const [authForm, setAuthForm] = useState({ username: '', password: '', email: '' });
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Thread states
+  const [threads, setThreads] = useState([]);
+  const [currentThread, setCurrentThread] = useState(null);
+  const [messages, setMessages] = useState([]);
+
+  // Message states
+  const [messageInput, setMessageInput] = useState('');
+  const [sendLoading, setSendLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
+
+  // UI states
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  
+  // ADDED: Document upload state
+  const [hasUploadedDoc, setHasUploadedDoc] = useState(false);
+
+  const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // Scroll to bottom
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
-    fetchDocuments();
-    fetchChatHistory();
-  }, []);
+    scrollToBottom();
+  }, [messages]);
 
-  const fetchDocuments = async () => {
+  // API Helper - FIXED to handle 204 No Content
+  const apiCall = async (endpoint, options = {}) => {
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Token ${token}` }),
+      ...options.headers,
+    };
+
+    if (options.body instanceof FormData) {
+      delete headers['Content-Type'];
+    }
+
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || error.detail || 'An error occurred');
+    }
+
+    // Handle 204 No Content - don't try to parse JSON
+    if (response.status === 204) {
+      return null;
+    }
+
+    // Only parse JSON if there's content
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return response.json();
+    }
+
+    return null;
+  };
+
+  // Auth Functions - wrapped with useCallback
+  const fetchCurrentUser = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/documents/`);
-      const data = await response.json();
-      setDocuments(data);
+      const data = await apiCall('/auth/user/');
+      setUser(data);
     } catch (err) {
-      console.error('Error fetching documents:', err);
-      setError('Failed to fetch documents');
+      console.error('Error fetching user:', err);
+      handleLogout();
+    }
+  }, [token]);
+
+  const fetchThreads = useCallback(async () => {
+    try {
+      const data = await apiCall('/threads/');
+      setThreads(data);
+    } catch (err) {
+      console.error('Error fetching threads:', err);
+    }
+  }, [token]);
+
+  // Initialize - FIXED useEffect dependencies
+  useEffect(() => {
+    if (token) {
+      fetchCurrentUser();
+      fetchThreads();
+    }
+  }, [token, fetchCurrentUser, fetchThreads]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
+    try {
+      const data = await apiCall('/auth/login/', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: authForm.username,
+          password: authForm.password,
+        }),
+      });
+
+      setToken(data.token);
+      setUser(data.user);
+      localStorage.setItem('token', data.token);
+      setAuthForm({ username: '', password: '', email: '' });
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
     }
   };
 
-  const fetchChatHistory = async () => {
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+
     try {
-      const response = await fetch(`${API_URL}/chat/`);
-      const data = await response.json();
-      setChatHistory(data);
+      const data = await apiCall('/auth/register/', {
+        method: 'POST',
+        body: JSON.stringify(authForm),
+      });
+
+      setToken(data.token);
+      setUser(data.user);
+      localStorage.setItem('token', data.token);
+      setAuthForm({ username: '', password: '', email: '' });
     } catch (err) {
-      console.error('Error fetching chat history:', err);
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await apiCall('/auth/logout/', { method: 'POST' });
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      setToken(null);
+      setUser(null);
+      setThreads([]);
+      setCurrentThread(null);
+      setMessages([]);
+      localStorage.removeItem('token');
+    }
+  };
+
+  // Thread Functions
+  const createNewThread = async () => {
+    try {
+      const data = await apiCall('/threads/', { method: 'POST' });
+      setThreads([data, ...threads]);
+      setCurrentThread(data);
+      setMessages(data.messages || []);
+      setHasUploadedDoc(false); // ADDED: Reset document flag
+      setSuccess('New chat created!');
+      setTimeout(() => setSuccess(''), 2000);
+    } catch (err) {
+      setError('Failed to create new thread');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  const selectThread = async (thread) => {
+    try {
+      const data = await apiCall(`/threads/${thread.id}/`);
+      setCurrentThread(data);
+      setMessages(data.messages || []);
+      
+      // ADDED: Check if thread has documents
+      const hasDoc = data.documents && data.documents.length > 0;
+      setHasUploadedDoc(hasDoc);
+    } catch (err) {
+      setError('Failed to load thread');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  // FIXED deleteThread to handle 204 response
+  const deleteThread = async (threadId, e) => {
+    e.stopPropagation();
+
+    if (!window.confirm('Delete this chat?')) return;
+
+    try {
+      await apiCall(`/threads/${threadId}/`, { method: 'DELETE' });
+
+      setThreads(threads.filter(t => t.id !== threadId));
+
+      if (currentThread?.id === threadId) {
+        setCurrentThread(null);
+        setMessages([]);
+        setHasUploadedDoc(false); // ADDED: Reset document flag
+      }
+
+      setSuccess('Chat deleted!');
+      setTimeout(() => setSuccess(''), 2000);
+    } catch (err) {
+      console.error('Delete error:', err);
+      setError('Failed to delete thread');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  // Message Functions
+  const sendMessage = async (e) => {
+    e.preventDefault();
+
+    if (!messageInput.trim() || !currentThread) return;
+
+    setSendLoading(true);
+    setError('');
+
+    try {
+      const data = await apiCall(`/threads/${currentThread.id}/send_message/`, {
+        method: 'POST',
+        body: JSON.stringify({ message: messageInput }),
+      });
+
+      setMessages([...messages, data.user_message, data.assistant_message]);
+      setMessageInput('');
+
+      fetchThreads();
+    } catch (err) {
+      setError('Failed to send message');
+      setTimeout(() => setError(''), 3000);
+    } finally {
+      setSendLoading(false);
+    }
+  };
+
+  // UPDATED: File Upload
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('title', file.name);
+    if (!file || !currentThread) return;
 
     setUploadLoading(true);
     setError('');
-    setSuccess('');
+
+    const formData = new FormData();
+    formData.append('file', file);
 
     try {
-      const response = await fetch(`${API_URL}/documents/`, {
+      const data = await apiCall(`/threads/${currentThread.id}/upload_document/`, {
         method: 'POST',
         body: formData,
+        headers: {},
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        setSuccess(`Document "${file.name}" uploaded successfully!`);
-        await fetchDocuments();
-        e.target.value = '';
-        setTimeout(() => setSuccess(''), 3000);
-      } else {
-        setError(data.error || 'Failed to upload document');
+      // UPDATE THE WELCOME MESSAGE instead of adding system message
+      if (data.updated_message_id) {
+        // Re-fetch the thread to get updated messages
+        const threadData = await apiCall(`/threads/${currentThread.id}/`);
+        setMessages(threadData.messages || []);
+        
+        // ADDED: Set document uploaded flag
+        setHasUploadedDoc(true);
       }
+
+      // Update thread title if provided
+      if (data.thread_title) {
+        setCurrentThread({
+          ...currentThread,
+          title: data.thread_title
+        });
+
+        setThreads(threads.map(t =>
+          t.id === currentThread.id
+            ? { ...t, title: data.thread_title }
+            : t
+        ));
+      }
+
+      setSuccess('Document uploaded!');
+      setTimeout(() => setSuccess(''), 3000);
+
+      e.target.value = '';
     } catch (err) {
-      setError('Error uploading document. Please try again.');
+      setError(err.message || 'Failed to upload document');
+      setTimeout(() => setError(''), 3000);
     } finally {
       setUploadLoading(false);
     }
   };
 
-  const handleDeleteDocument = async (id, title) => {
-    if (!window.confirm(`Are you sure you want to delete "${title}"?`)) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_URL}/documents/${id}/`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        setSuccess('Document deleted successfully');
-        await fetchDocuments();
-        setTimeout(() => setSuccess(''), 3000);
-      }
-    } catch (err) {
-      console.error('Error deleting document:', err);
-      setError('Failed to delete document');
+  // ADDED: Helper functions for message display
+  const getMessageLabel = (role) => {
+    switch (role) {
+      case 'user':
+        return 'You';
+      case 'assistant':
+        return 'Chatbot';
+      case 'system':
+        return 'System';
+      default:
+        return role;
     }
   };
 
-  const handleAskQuestion = async (e) => {
-    e.preventDefault();
-    if (!question.trim() || loading) return;
-
-    if (documents.length === 0) {
-      setError('Please upload at least one document first');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch(`${API_URL}/chat/ask/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ question: question.trim() }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setChatHistory([data, ...chatHistory]);
-        setQuestion('');
-      } else {
-        setError(data.error || 'Failed to get answer');
-      }
-    } catch (err) {
-      setError('Error asking question. Please try again.');
-    } finally {
-      setLoading(false);
+  const getMessageIcon = (role) => {
+    switch (role) {
+      case 'user':
+        return <User size={18} />;
+      case 'assistant':
+        return <Bot size={18} />;
+      case 'system':
+        return <MessageCircle size={18} />;
+      default:
+        return null;
     }
   };
 
-  const clearAllDocuments = async () => {
-    if (!window.confirm('Are you sure you want to delete ALL documents? This will also clear the vector database.')) {
-      return;
-    }
+  // Render Auth Screen
+  if (!token) {
+    return (
+      <div className="auth-container">
+        <div className="auth-box">
+          <div className="auth-header">
+            <MessageCircle size={48} className="auth-icon" />
+            <h1>RAG Chat System</h1>
+            <p>Intelligent document-based conversations</p>
+          </div>
 
-    try {
-      const response = await fetch(`${API_URL}/documents/clear_all/`, {
-        method: 'DELETE',
-      });
+          {authError && (
+            <div className="alert alert-error">
+              <X size={16} />
+              <span>{authError}</span>
+            </div>
+          )}
 
-      if (response.ok) {
-        setSuccess('All documents cleared');
-        await fetchDocuments();
-        setChatHistory([]);
-        setTimeout(() => setSuccess(''), 3000);
-      }
-    } catch (err) {
-      console.error('Error clearing documents:', err);
-      setError('Failed to clear documents');
-    }
-  };
+          <div className="auth-tabs">
+            <button
+              className={showAuth === 'login' ? 'active' : ''}
+              onClick={() => setShowAuth('login')}
+            >
+              Login
+            </button>
+            <button
+              className={showAuth === 'register' ? 'active' : ''}
+              onClick={() => setShowAuth('register')}
+            >
+              Register
+            </button>
+          </div>
 
-  const clearChatHistory = async () => {
-    if (!window.confirm('Are you sure you want to clear chat history?')) {
-      return;
-    }
+          {showAuth === 'login' ? (
+            <form onSubmit={handleLogin} className="auth-form">
+              <input
+                type="text"
+                placeholder="Username"
+                value={authForm.username}
+                onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={authForm.password}
+                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                required
+              />
+              <button type="submit" disabled={authLoading}>
+                {authLoading ? <Loader className="spinning" size={20} /> : 'Login'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleRegister} className="auth-form">
+              <input
+                type="text"
+                placeholder="Username"
+                value={authForm.username}
+                onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+                required
+              />
+              <input
+                type="email"
+                placeholder="Email"
+                value={authForm.email}
+                onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={authForm.password}
+                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                required
+              />
+              <button type="submit" disabled={authLoading}>
+                {authLoading ? <Loader className="spinning" size={20} /> : 'Register'}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
 
-    try {
-      const response = await fetch(`${API_URL}/chat/clear_history/`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        setChatHistory([]);
-        setSuccess('Chat history cleared');
-        setTimeout(() => setSuccess(''), 3000);
-      }
-    } catch (err) {
-      console.error('Error clearing chat history:', err);
-      setError('Failed to clear chat history');
-    }
-  };
-
+  // Main Chat Interface
   return (
-    <div className="app">
-      <div className="container">
-        {/* Header */}
-        <div className="header">
-          <h1 className="title">RAG System</h1>
-          <p className="subtitle">Upload documents and ask questions powered by AI</p>
+    <div className="app-container">
+      {/* Sidebar */}
+      <div className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
+        <div className="sidebar-header">
+          <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>My Chats</h3>
+          <button onClick={createNewThread} className="new-chat-btn" title="New Chat">
+            <Plus size={20} />
+          </button>
+        </div>
+
+        <div className="threads-list">
+          {threads.length === 0 ? (
+            <div style={{
+              padding: '40px 20px',
+              textAlign: 'center',
+              color: '#888',
+              fontSize: '14px'
+            }}>
+              <MessageCircle size={48} style={{ margin: '0 auto 16px', opacity: 0.3 }} />
+              <p>No chats yet</p>
+              <p style={{ fontSize: '12px', marginTop: '8px' }}>
+                Click the + button to start
+              </p>
+            </div>
+          ) : (
+            threads.map((thread) => (
+              <div
+                key={thread.id}
+                className={`thread-item ${currentThread?.id === thread.id ? 'active' : ''}`}
+                onClick={() => selectThread(thread)}
+              >
+                <MessageCircle size={16} />
+                <div className="thread-info">
+                  <span className="thread-title">{thread.title}</span>
+                  <span className="thread-meta">{thread.message_count} messages</span>
+                </div>
+                <button
+                  onClick={(e) => deleteThread(thread.id, e)}
+                  className="delete-thread-btn"
+                  title="Delete"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <button onClick={handleLogout} className="logout-btn">
+          <LogOut size={20} />
+          <span>Logout</span>
+        </button>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="main-content">
+        {/* Chat header - UPDATED with document indicator */}
+        <div className="chat-header">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="toggle-sidebar-btn"
+          >
+            <Menu size={24} />
+          </button>
+          <div style={{ flex: 1 }}>
+            <h2 style={{ margin: 0 }}>Welcome, {user?.username}!</h2>
+
+            {/* Show document loaded indicator after successful upload */}
+            {hasUploadedDoc && currentThread && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginTop: '8px',
+                fontSize: '14px',
+                color: '#059669',
+                fontWeight: '500'
+              }}>
+                <span>📄 Document loaded</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Notifications */}
         {error && (
-          <div className="notification error">
+          <div className="alert alert-error">
+            <X size={16} />
             <span>{error}</span>
-            <button onClick={() => setError('')} className="close-btn">
-              <X size={20} />
+            <button onClick={() => setError('')}>
+              <X size={16} />
             </button>
           </div>
         )}
 
         {success && (
-          <div className="notification success">
+          <div className="alert alert-success">
+            <Check size={16} />
             <span>{success}</span>
-            <button onClick={() => setSuccess('')} className="close-btn">
-              <X size={20} />
-            </button>
           </div>
         )}
 
-        {/* Main Content */}
-        <div className="main-grid">
-          {/* Documents Panel */}
-          <div className="panel documents-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">
-                <FileText size={24} />
-                Documents ({documents.length})
-              </h2>
-              {documents.length > 0 && (
-                <button onClick={clearAllDocuments} className="clear-btn">
-                  Clear All
-                </button>
-              )}
-            </div>
-
-            {/* Upload Area */}
-            <label className="upload-area">
-              <input
-                type="file"
-                className="file-input"
-                accept=".pdf,.docx,.txt"
-                onChange={handleFileUpload}
-                disabled={uploadLoading}
-              />
-              <div className="upload-content">
-                {uploadLoading ? (
-                  <>
-                    <Loader className="upload-icon spinning" size={32} />
-                    <p className="upload-text">Processing...</p>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="upload-icon" size={32} />
-                    <p className="upload-text">Click to upload</p>
-                    <p className="upload-subtext">PDF, DOCX, TXT (Max 10MB)</p>
-                  </>
-                )}
-              </div>
-            </label>
-
-            {/* Documents List */}
-            <div className="documents-list">
-              {documents.map((doc) => (
-                <div key={doc.id} className="document-item">
-                  <div className="document-info">
-                    <File size={20} className="document-icon" />
-                    <div className="document-details">
-                      <p className="document-title">{doc.title}</p>
-                      <p className="document-meta">
-                        {doc.file_type.toUpperCase()}
-                        {doc.processed && ' • Processed'}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleDeleteDocument(doc.id, doc.title)}
-                    className="delete-btn"
-                    title="Delete document"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))}
-              {documents.length === 0 && (
-                <div className="empty-state">
-                  <p>No documents uploaded yet</p>
-                  <p className="empty-subtext">Upload a document to get started</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Chat Panel */}
-          <div className="panel chat-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">
-                <MessageCircle size={24} />
-                Ask Questions
-              </h2>
-              {chatHistory.length > 0 && (
-                <button onClick={clearChatHistory} className="clear-btn">
-                  Clear History
-                </button>
-              )}
-            </div>
-
-            {/* Chat Messages */}
-            <div className="chat-messages">
-              {chatHistory.map((chat) => (
-                <div key={chat.id} className="chat-item">
-                  <div className="message question">
-                    <p className="message-text">{chat.question}</p>
-                  </div>
-                  <div className="message answer">
-                    <p className="message-text">{chat.answer}</p>
-                    {chat.sources && chat.sources.length > 0 && (
-                      <div className="sources">
-                        <p className="sources-title">Sources:</p>
-                        {chat.sources.map((source, idx) => (
-                          <div key={idx} className="source-item">
-                            <span className="source-bullet">•</span>
-                            <span className="source-text">{source.content}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {chatHistory.length === 0 && (
-                <div className="empty-state chat-empty">
-                  <MessageCircle size={48} className="empty-icon" />
-                  <p>No messages yet</p>
-                  <p className="empty-subtext">
-                    {documents.length === 0
-                      ? 'Upload documents first, then ask questions'
-                      : 'Ask a question about your documents'}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Input Form */}
-            <div className="chat-input-wrapper">
-              <input
-                type="text"
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleAskQuestion(e);
-                  }
-                }}
-                placeholder={
-                  documents.length === 0
-                    ? 'Upload documents first...'
-                    : 'Ask a question about your documents...'
-                }
-                className="chat-input"
-                disabled={loading || documents.length === 0}
-              />
-              <button
-                onClick={handleAskQuestion}
-                disabled={loading || !question.trim() || documents.length === 0}
-                className="send-btn"
-                title="Send message"
-              >
-                {loading ? (
-                  <Loader className="spinning" size={20} />
-                ) : (
-                  <Send size={20} />
-                )}
+        {/* Messages - UPDATED with labels */}
+        <div className="messages-container">
+          {!currentThread ? (
+            <div className="empty-state">
+              <MessageCircle size={64} />
+              <h3>Welcome {user?.username}!</h3>
+              <p>Hi, I am your AI Chatbot. Create a new chat to get started</p>
+              <button onClick={createNewThread} className="create-first-chat">
+                <Plus size={20} />
+                Start New Chat
               </button>
             </div>
-          </div>
+          ) : messages.length === 0 ? (
+            <div className="empty-state">
+              <Loader className="spinning" size={48} />
+              <p>Loading messages...</p>
+            </div>
+          ) : (
+            messages.map((message) => (
+              <div key={message.id} className={`message message-${message.role}`}>
+                <div className="message-content">
+                  {/* Message label header */}
+                  <div className="message-label">
+                    {getMessageIcon(message.role)}
+                    <span>{getMessageLabel(message.role)}</span>
+                  </div>
+
+                  {/* Message text */}
+                  <p className="message-text" style={{ whiteSpace: 'pre-line' }}>
+                    {message.content}
+                  </p>
+
+                  {/* Sources */}
+                  {message.sources && message.sources.length > 0 && (
+                    <div className="message-sources">
+                      <strong>Sources:</strong>
+                      {message.sources.map((source, idx) => (
+                        <div key={idx} className="source-item">
+                          • {source.content}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+          <div ref={messagesEndRef} />
         </div>
+
+        {/* Input Area */}
+        {currentThread && (
+          <div className="input-container">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept=".pdf,.docx,.txt"
+              style={{ display: 'none' }}
+            />
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadLoading}
+              className="attach-btn"
+              title="Upload Document"
+            >
+              {uploadLoading ? (
+                <Loader className="spinning" size={20} />
+              ) : (
+                <Paperclip size={20} />
+              )}
+            </button>
+
+            <input
+              type="text"
+              value={messageInput}
+              onChange={(e) => setMessageInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage(e)}
+              placeholder="Type a message..."
+              disabled={sendLoading}
+              className="message-input"
+            />
+
+            <button
+              onClick={sendMessage}
+              disabled={sendLoading || !messageInput.trim()}
+              className="send-btn"
+              title="Send"
+            >
+              {sendLoading ? (
+                <Loader className="spinning" size={20} />
+              ) : (
+                <Send size={20} />
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
