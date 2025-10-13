@@ -1,7 +1,6 @@
 # 🧠 AskMyDocs
 
-AskMyDocs is an AI-powered document assistant that allows users to upload files and ask natural language questions to retrieve accurate answers from their content.  
-It uses **Retrieval-Augmented Generation (RAG)** with **LangChain**, **PinecornVector**, and **Llama** for intelligent context-aware responses.
+AskMyDocs is an AI-powered document assistant that allows users to upload files and ask natural language questions to retrieve accurate answers from their content. It leverages Retrieval-Augmented Generation (RAG) using LangChain, Pinecone Vector, and LLaMA to provide intelligent, context-aware responses.
 
 ---
 
@@ -21,7 +20,7 @@ It uses **Retrieval-Augmented Generation (RAG)** with **LangChain**, **PinecornV
 ### **Backend**
 - Python, Django REST Framework  
 - LangChain, LangChain-Groq, LangChain-Chroma  
-- Pinecornvector (Vector Store)  
+- Pineconevector (Vector Store)  
 - Pydantic, dotenv, requests
 
 ### **Frontend**
